@@ -16,17 +16,48 @@ import sys
 import time
 import random
 import traceback
-from libs.core.log import getLogger
-from libs.core.utils import syncGeventLock
-from libs.core._signal import initGeventSignal
+import functools
+# from libs.core.log import getLogger
+# from libs.core.utils import syncGeventLock
+# from libs.core._signal import initGeventSignal
 
-# 日志
-log = getLogger("TEST")
+
 #设定对共享资源的访问数量
 sem = BoundedSemaphore(1)
 signal_stop = False
+# 日志
+# log = getLogger("TEST")
+import logging
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(module)s:%(lineno)s %(message)s'))
+log = logging.getLogger('test')
+log.addHandler(_handler)
+log.setLevel(logging.DEBUG)
+
+# gevent加锁
+def syncGeventLock(sem):
+    def lock(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with sem:
+                return func(*args, **kwargs)
+        return wrapper
+    return lock
+
+# --------------信号量处理---------------
+# 设置监听信号量
+# 设置程序结束信号量
+def initGeventSignal(handler):
+    import signal
+    import gevent.signal
+    gevent.signal(signal.SIGINT, handler, 'sigint')  # 处理 Ctrl-C
+    gevent.signal(signal.SIGTERM, handler, 'sigterm')  # 处理 kill
+    gevent.signal(signal.SIGALRM, handler, 'sigalrm')  # 处理 signal.alarm()
 
 class StatList(list):
+
+    def __init__(self):
+        super().__init__()
 
     @syncGeventLock(sem)
     def appends(self, ident, cid, count=1, points=1):
@@ -35,18 +66,18 @@ class StatList(list):
             if stat["date"] == T and stat["ident"] == ident and stat["cid"] == cid:
                 stat["count_send"] += count
                 stat["points"] += points
-                log.info('-----1------:{}'.format(stat))
+                log.info('-----update------:{}'.format(stat))
                 break
         else:
             stat = {"date": T, "ident": ident, "cid": cid, "count_send": count, "points": points,}
             self.append(stat)
-            log.info('-----2------:{}'.format(stat))
+            log.info('-----new------:{}'.format(stat))
 
     @syncGeventLock(sem)
     def pops(self):
         while self:
             d = self.pop()
-            log.info('-----3------:{}'.format(d))
+            log.info('-----consumer------:{}'.format(d))
         log.info(self)
 
 SL = StatList()
